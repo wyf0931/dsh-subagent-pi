@@ -1,98 +1,108 @@
 ---
-description: "把 Pi coding agent 作为 DeepSeek Harness 子代理运行——一个可安装插件包，加上两个预稳定插件：一个注册 Pi 后端的 provider，一个注册委派任务给 Pi 的模型可见工具。"
-kind: "package-group"
+description: "把本机 Pi coding agent 接成 DeepSeek Harness 子代理提供方：每次委派一个隔离的 pi 子进程，会话可通过 Pi RPC 续跑。"
+kind: "package-bundle"
 ---
 
-# dsh-pi
+# dsh-subagent-pi
 
-[English](README.md) | 中文
+English | 中文
 
-[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+## 它是什么
 
-## 摘要
+`dsh-subagent-pi` 让 DeepSeek Harness（DSH）里的智能体把任务交给**本机**的
+[Pi coding agent](https://github.com/earendil-works/pi-coding-agent)。每次委派
+都会启动一个**自己的 `pi --mode rpc` 子进程**，Pi 的任何代码都不进入 DSH 进程；
+Pi 扩展出错、崩溃、命令挂死，都不会把 DSH 一起拖下水。
 
-`dsh-pi` 让 [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) 运行在 DeepSeek Harness（DSH）内部。父 DSH 代理把一个自包含任务委派给 Pi，Pi 用自己的工具和模型在独立上下文中工作，父代理随后收到 Pi 的最终答案作为完成通知。Pi 通过其 SDK 运行在 DSH 进程内，因此无需安装或派生 Pi CLI。
+Pi CLI 仍是权威：模型、认证、技能、扩展、MCP，全都用你在终端里已经配好的那一套。
+本插件不打包任何 Pi 依赖，也不复制 Pi 的安装。
 
-该集成沿用 DSH 社区对 Codex 和 Claude Code 已有的 provider + tool 能力缝：
-
-| 包 | 角色 |
-|---|---|
-| [`dsh-pi`](packages/bundle/README.zh.md) | 可安装插件包：插入两行，提供提供方配置页，并自带本地化元数据与图标 |
-| [`dsh-subagent-pi`](packages/subagent-pi/README.zh.md) | 在共享子代理服务上注册一个一次性 Pi `SubagentProvider` |
-| [`dsh-tool-subagent-pi`](packages/tool-subagent-pi/README.zh.md) | 注册 `delegate_pi` 工具，供模型调用把工作交给 Pi |
-
-三个包都处于预稳定状态。其公开 API 可能变化，并遵循 DSH 的[预稳定发布策略](https://github.com/deepseek-ai/deepseek-harness#readme)。
-
-## 要求
-
-- Node >= 22.19.0
-- 满足 `engines.dsh`（`^0.2.1-rc.3`）的 DSH 运行时，且已挂载子代理与工具能力缝（任何暴露 `ctx.subagents` 和 `ctx.tools` 的 `dsh` profile）
-- 已配置一个 Pi 模型 provider。Pi 通过自己的 agent 目录（默认 `~/.pi/agent`，或 `PI_CODING_AGENT_DIR`）解析模型，因此首次委派前先在那里配置认证。本包在委派被接受前不启动任何会话，也不安装 provider 凭证。
-
-> 此前的 `engines.dsh: ^0.2.1` 会排除所有 `0.2.1-rc.*` 运行时（尽管 API 完全一致），导致 DSH 拒绝这两行。现在范围是 `^0.2.1-rc.3`，可接受 `0.2.1-rc.3`、`0.2.1-rc.5`、`0.2.1` 和 `0.2.2-alpha.*`。
+| 行 | 模块 | 注册什么 |
+|---|---|---|
+| `subagent-pi` | `dsh-subagent-pi` | `pi` 子代理提供方（拉起 RPC 子进程） |
+| `tool-subagent-pi` | `dsh-subagent-pi/tool` | 模型可见的 `delegate_pi` 工具 |
 
 ## 安装
 
-先构建一次，再通过 Plugin Manager（`install_bundle`）或 CLI 把插件包安装到 profile：
-
 ```sh
-pnpm install
-pnpm build
-dsh plugin --profile <profile> add /absolute/path/to/dsh-pi/packages/bundle
+pnpm install && pnpm build
+dsh plugin --profile <profile> add /absolute/path/to/dsh-subagent-pi
 ```
 
-链接方式的 checkout 会直接从插件包自身解析两行和客户端配置页，因此 profile 不需要额外依赖。安装后模型即可看到 `delegate_pi` 工具。如果 profile 不会热加载插件包，请重启 DSH。
+也可以用 Plugins 页面安装该目录。若 profile 不热加载插件，重启 DSH；之后模型即可
+调用 `delegate_pi`。
 
-手动组合仍然可用：把 [`dsh-subagent-pi`](packages/subagent-pi/README.zh.md) 与 [`dsh-tool-subagent-pi`](packages/tool-subagent-pi/README.zh.md) 安装为 profile 依赖，并为两个包名插入行。
+## 可续跑会话（核心特性）
 
-### 配置
+每次结果都带一个 `piSessionId`。把它作为 `session` 传回（**cwd 必须相同**），
+就能继续同一个 Pi 会话：
 
-打开侧边栏的 **Plugins**，选择 `dsh-pi`，展开 **Pi Subagent** 行并点击 **Configure**。页面可编辑模型、思考级别、回合超时和被排除的工具；**保存** 会写入 profile 覆盖层，并在下一次委派生效，无需重启提供方。`providerName` 与 `agentDir` 只能通过 YAML 配置，因为它们标识提供方实例及其 Pi 目录。
+```jsonc
+// 第一次
+{ "description": "修 flaky 测试", "prompt": "复现并修复这个 flaky 测试。", "cwd": "." }
+// -> { "piSessionId": "0c1f…", "subagentId": "…" }
 
-UI 写入与手动 `cordis.patch.yml` 覆盖是同一层 profile 配置，因此脚本化部署仍可继续使用文件：
+// 之后：Pi 已有完整历史，不用重新解释
+{ "description": "审查修复", "prompt": "现在审查你的改动，看边界情况。", "session": "0c1f…", "cwd": "." }
+```
+
+映射到 Pi 自己的参数：首次用 `--session-id <id>`，续跑用 `--session <id>`。会话存在
+Pi 自己的位置上，所以在该目录执行 `pi --session <id>` 或 `pi --resume` 能打开同一个
+对话。
+
+## 配置
+
+| 字段 | 默认 | 含义 |
+|---|---|---|
+| `providerName` | `pi` | 注册到子代理服务的名称 |
+| `piPath` | `pi` | Pi 可执行文件名或绝对路径（默认走 `PATH`） |
+| `agentDir` | Pi 默认 | 给子进程设置 `PI_CODING_AGENT_DIR` |
+| `sessionDir` | Pi 默认 | `--session-dir`，会话存储与查找目录 |
+| `approve` | `true` | 传 `--approve`：无人能回答 Pi 的项目信任对话框 |
+| `model` | Pi 自身选择 | `--model`，例如 `deepseek/deepseek-flash` |
+| `thinking` | Pi 自身选择 | `--thinking`：`off` … `max` |
+| `excludeTools` | `[]` | `--exclude-tools`，要禁用的 Pi 工具名 |
+| `timeoutMs` | 不超时 | 提示发出后的回合上限 |
+
+`model`、`thinking`、`excludeTools`、`timeoutMs` 可在 Plugins 页面编辑，下一次委派
+生效。`providerName`、`piPath`、`agentDir`、`sessionDir`、`approve` 只走 YAML，
+因为它们标识提供方实例与其环境。
 
 ```yaml
 - id: subagent-pi
   config:
     providerName: pi
+    piPath: /Users/me/.local/bin/pi
     model: deepseek/deepseek-flash
-    effort: medium
+    thinking: medium
+- id: tool-subagent-pi
+  config:
+    providerName: pi
+    toolName: delegate_pi
 ```
 
-## 快速开始
+## 一次委派发生了什么
 
-模型每次调用委派一个任务：
+1. 模型调用 `delegate_pi`；工具选好 Pi 会话 id，立即返回
+   `{ subagentId, piSessionId, resumed }`。
+2. provider 在子 `cwd` 里启动 `pi --mode rpc`，发送一条 `prompt` 记录。
+3. 从 stdout 读严格 JSONL，取最后一条非空 assistant 消息，等待 `agent_settled`。
+4. 扩展对话框一律回 `cancelled`（没有人可答），关闭子进程，答案以完成通知回到父会话。
 
-```jsonc
-{
-  "description": "找出失败的测试",
-  "prompt": "在本仓库运行测试套件，报告第一个失败测试的名字及其所属文件。",
-  "cwd": "."
-}
-```
+工具与 provider 之间只有一条私有通道：prompt 末尾一个保留控制块，provider 解析后
+剥离，Pi 永远看不到；它只携带会话 id 和是否为续跑。
 
-该工具立即返回子 id；稍后的完成通知携带 Pi 的最终助手文本。把相互独立的委派一起启动，在它们运行时继续做有用的工作。当只剩等待结果时，结束回合而不是轮询。
+## 已知限制
 
-## 仓库结构
+- 一个子进程只跑一个提示：不支持中途 steer、不向父会话流式输出进度。
+- 续跑要求相同 `cwd` 和相同 `--session-dir`，因为 Pi 按目录查找会话。
+- 需要回答的 Pi 对话框会被取消；默认 `approve: true`，避免项目信任弹窗。
+- 扩展参数与版本取决于本机 Pi；RPC 协议随版本演进，本插件以 Pi 1.4.x 为基线。
 
-```
-packages/bundle/            可安装的 dsh-pi 插件包（两行、客户端配置页、本地化、图标）
-packages/subagent-pi/       Pi 子代理 provider 插件
-packages/tool-subagent-pi/  delegate_pi 工具插件
-```
+## 仓库历史
 
-## 命令
-
-```sh
-pnpm install
-pnpm build        # 先出 tsc 类型，再为每个包出 tsdown ESM 运行时产物
-pnpm typecheck
-pnpm test         # 单元测试；不需要网络或 Pi 凭证
-pnpm test:e2e     # DSH_PI_E2E=1；通过已安装的 Pi SDK 真实委派一个任务
-pnpm clean
-```
-
-`pnpm test:e2e` 使用 Pi 配置的默认模型。设置 `DSH_PI_E2E_MODEL=provider/model` 可固定真实测试使用的模型，例如 `DSH_PI_E2E_MODEL=deepseek/deepseek-flash`。
+本仓库曾以 `dsh-pi` 发布，内含三个包（`dsh-pi`、`dsh-subagent-pi`、
+`dsh-tool-subagent-pi`）。现在是单包 `dsh-subagent-pi`，旧 GitHub 链接会自动跳转。
 
 ## 许可
 

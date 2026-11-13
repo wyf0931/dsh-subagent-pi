@@ -1,98 +1,121 @@
 ---
-description: "Run the Pi coding agent as a DeepSeek Harness subagent — an installable bundle plus two pre-stable plugins that register a Pi-backed provider and the model-facing tool that delegates to it."
-kind: "package-group"
+description: "Pi coding agent as a DeepSeek Harness subagent provider: one isolated local `pi` process per delegation, with resumable sessions over Pi RPC."
+kind: "package-bundle"
 ---
 
-# dsh-pi
+# dsh-subagent-pi
 
 English | [中文](README.zh.md)
 
-[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
+## What it is
 
-## Summary
+`dsh-subagent-pi` lets a DeepSeek Harness (DSH) agent delegate work to the local
+[Pi coding agent](https://github.com/earendil-works/pi-coding-agent). Each
+delegation starts **its own `pi --mode rpc` process**; no Pi code runs inside
+the DSH process, so a Pi extension bug, a crash, or a hung tool cannot take DSH
+down with it.
 
-`dsh-pi` runs the [Pi coding agent](https://github.com/earendil-works/pi-coding-agent) inside DeepSeek Harness (DSH). The parent DSH agent delegates a self-contained task to Pi, which works in its own context with its own tools and model, and the parent receives Pi's final answer as a completion notice. Pi runs in the DSH process through its SDK, so there is no Pi CLI to install or fork.
+The local Pi CLI stays authoritative: its models, authentication, skills,
+extensions and MCP servers are exactly the ones you already use in the terminal.
+This bundle adds no Pi dependency of its own.
 
-The integration follows the same provider-and-tool seam the DSH community already uses for Codex and Claude Code:
-
-| Package | Role |
-|---|---|
-| [`dsh-pi`](packages/bundle/README.md) | The installable bundle: inserts both rows, ships the provider's configuration page, locale metadata, and icons |
-| [`dsh-subagent-pi`](packages/subagent-pi/README.md) | Registers a one-shot Pi `SubagentProvider` on the shared subagent service |
-| [`dsh-tool-subagent-pi`](packages/tool-subagent-pi/README.md) | Registers the `delegate_pi` tool the model calls to hand work to Pi |
-
-All three packages are pre-stable. Their public APIs may change, and they follow DSH's [pre-stable release policy](https://github.com/deepseek-ai/deepseek-harness#readme).
-
-## Requirements
-
-- Node >= 22.19.0
-- A DSH runtime that satisfies `engines.dsh` (`^0.2.1-rc.3`), with the subagent and tool capability seams mounted (any `dsh` profile that exposes `ctx.subagents` and `ctx.tools`)
-- A Pi model provider configured. Pi resolves models through its own agent directory (`~/.pi/agent` by default, or `PI_CODING_AGENT_DIR`), so configure authentication there before the first delegation. This package starts no session until a delegation is accepted and installs no provider credentials.
-
-> The earlier `engines.dsh: ^0.2.1` declaration excluded every `0.2.1-rc.*` runtime even though the APIs are identical, so DSH denied both rows. The range is now `^0.2.1-rc.3`, which admits `0.2.1-rc.3`, `0.2.1-rc.5`, `0.2.1`, and `0.2.2-alpha.*`.
+| Row | Module | What it registers |
+|---|---|---|
+| `subagent-pi` | `dsh-subagent-pi` | the `pi` subagent provider (spawns the RPC child) |
+| `tool-subagent-pi` | `dsh-subagent-pi/tool` | the `delegate_pi` model tool |
 
 ## Install
 
-Build the checkout once, then install the bundle into a profile with the Plugin Manager (`install_bundle`) or the CLI:
-
 ```sh
-pnpm install
-pnpm build
-dsh plugin --profile <profile> add /absolute/path/to/dsh-pi/packages/bundle
+pnpm install && pnpm build
+dsh plugin --profile <profile> add /absolute/path/to/dsh-subagent-pi
 ```
 
-A linked checkout resolves both rows and the client configuration page from the bundle package itself, so no extra profile dependencies are required. After installation the model sees the `delegate_pi` tool. If the profile does not hot-reload bundles, restart DSH.
+Or install the directory through the Plugins page. Restart DSH if the profile
+does not hot-load bundles. `delegate_pi` then appears for the model.
 
-Manual composition remains available: install [`dsh-subagent-pi`](packages/subagent-pi/README.md) and [`dsh-tool-subagent-pi`](packages/tool-subagent-pi/README.md) as profile dependencies and insert rows for both package names.
+## Resumable sessions (the point)
 
-### Configure
+Every result carries a `piSessionId`. Pass it back as `session` — with the same
+`cwd` — to continue that Pi conversation:
 
-Open **Plugins** in the sidebar, select `dsh-pi`, open the **Pi Subagent** row, and click **Configure**. The page edits the model, thinking level, turn timeout, and excluded tools; **Save** writes a profile override and applies it to the next delegation without restarting the provider. `providerName` and `agentDir` remain YAML-only because they identify the provider instance and its Pi home.
+```jsonc
+// first delegation
+{ "description": "Fix flaky test", "prompt": "Reproduce and fix the flaky test.", "cwd": "." }
+// -> { "piSessionId": "0c1f…", "subagentId": "…" }
 
-The UI writes the same profile layer as a manual `cordis.patch.yml` override, so scripted deployments can keep using the file:
+// later: Pi already has the whole history, so this costs no re-explaining
+{ "description": "Review the fix", "prompt": "Now review your change for edge cases.", "session": "0c1f…", "cwd": "." }
+```
+
+The provider maps this onto Pi's own flags: `--session-id <id>` for a first
+delegation and `--session <id>` for a resume. Sessions live where Pi keeps them,
+so `pi --session <id>` or `pi --resume` in that directory reaches the same
+conversation.
+
+## Configuration
+
+| Field | Default | Meaning |
+|---|---|---|
+| `providerName` | `pi` | name registered on the subagent service |
+| `piPath` | `pi` | Pi executable name or absolute path (from `PATH` by default) |
+| `agentDir` | Pi default | sets `PI_CODING_AGENT_DIR` for the child |
+| `sessionDir` | Pi default | `--session-dir`, where sessions are stored and looked up |
+| `approve` | `true` | pass `--approve`: no human can answer Pi's project-trust dialog |
+| `model` | Pi selection | `--model`, e.g. `deepseek/deepseek-flash` |
+| `thinking` | Pi selection | `--thinking`: `off` … `max` |
+| `excludeTools` | `[]` | `--exclude-tools`, Pi tool names to disable |
+| `timeoutMs` | none | turn deadline after the prompt is sent |
+
+`model`, `thinking`, `excludeTools` and `timeoutMs` are editable from the
+Plugins page and apply to the next delegation. `providerName`, `piPath`,
+`agentDir`, `sessionDir` and `approve` are YAML-only, because they identify the
+provider instance and its environment.
 
 ```yaml
 - id: subagent-pi
   config:
     providerName: pi
+    piPath: /Users/me/.local/bin/pi
     model: deepseek/deepseek-flash
-    effort: medium
+    thinking: medium
+- id: tool-subagent-pi
+  config:
+    providerName: pi
+    toolName: delegate_pi
 ```
 
-## Quickstart
+## How a delegation runs
 
-The model delegates one task per call:
+1. The model calls `delegate_pi`; the tool picks a Pi session id and returns
+   `{ subagentId, piSessionId, resumed }` immediately.
+2. The provider spawns `pi --mode rpc` in the child `cwd` and sends one
+   `prompt` record.
+3. It reads strict JSONL from stdout, keeps the last non-empty assistant
+   message, and waits for `agent_settled`.
+4. Extension dialogs are answered `cancelled` (there is no human), the child is
+   shut down, and the answer reaches the parent as a completion notice.
 
-```jsonc
-{
-  "description": "Find the failing test",
-  "prompt": "Run the test suite in this repo and report the name of the first failing test and the file that owns it.",
-  "cwd": "."
-}
-```
+The only private channel between the tool and the provider is one reserved
+control block appended to the prompt and stripped before Pi sees it; it carries
+the session id and whether this is a resume.
 
-The tool returns a child id immediately; a later completion notice carries Pi's final assistant text. Start independent delegations together and continue useful work while they run. When only waiting for their results remains, end the turn instead of polling.
+## Known limits
 
-## Repository
+- One prompt per child process: no mid-run steering, no streaming into the
+  parent, no progress events.
+- A resume needs the same `cwd` and the same `--session-dir`, because Pi looks
+  sessions up per directory.
+- Pi dialogs that require an answer are cancelled; enable `approve` (default)
+  so project-local files are trusted without a prompt.
+- Extension flags and versions are whatever the local Pi provides; RPC is
+  version-specific enough that this bundle documents Pi 1.4.x as its baseline.
 
-```
-packages/bundle/            The installable dsh-pi bundle (rows, client config page, locale, icons)
-packages/subagent-pi/       The Pi subagent provider plugin
-packages/tool-subagent-pi/  The delegate_pi tool plugin
-```
+## Repository history
 
-## Commands
-
-```sh
-pnpm install
-pnpm build        # tsc types, then the tsdown ESM runtime artifact per package
-pnpm typecheck
-pnpm test         # unit tests; no network or Pi credentials needed
-pnpm test:e2e     # DSH_PI_E2E=1; delegates a real task through the installed Pi SDK
-pnpm clean
-```
-
-`pnpm test:e2e` uses Pi's configured default model. Set `DSH_PI_E2E_MODEL=provider/model` to pin the model the live test uses, for example `DSH_PI_E2E_MODEL=deepseek/deepseek-flash`.
+This repository was published as `dsh-pi` with three packages (`dsh-pi`,
+`dsh-subagent-pi`, `dsh-tool-subagent-pi`). It is now the single package
+`dsh-subagent-pi`; the old GitHub URLs redirect here.
 
 ## License
 

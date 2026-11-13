@@ -1,58 +1,92 @@
 {
-  "name": "dsh-pi-workspace",
-  "version": "0.1.0-alpha.1",
-  "private": true,
-  "description": "Pi coding agent integration for DeepSeek Harness (DSH).",
+  "name": "dsh-subagent-pi",
+  "version": "0.2.0",
+  "description": "Pi coding agent as a DeepSeek Harness subagent provider: one isolated `pi` process per delegation, with resumable sessions over Pi RPC.",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "bundle",
+    "pi",
+    "coding-agent",
+    "subagent",
+    "rpc"
+  ],
   "license": "MIT",
+  "author": "dsh-pi contributors",
   "type": "module",
-  "engines": {
-    "node": ">=22.19.0"
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./tool": {
+      "types": "./lib/types/tool.d.ts",
+      "default": "./lib/tool.js"
+    },
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon.svg": "./icon.svg",
+    "./tool/locale/*.json": "./tool/locale/*.json",
+    "./tool/icon.svg": "./tool/icon.svg",
+    "./package.json": "./package.json"
   },
-  "packageManager": "pnpm@10.30.0",
+  "files": [
+    "lib",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "tool",
+    "README.md",
+    "README.zh.md"
+  ],
+  "engines": {
+    "node": ">=22.19.0",
+    "dsh": "^0.2.1-rc.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
+    }
+  },
   "scripts": {
-    "build:types": "tsc -b tsconfig.build.json --force",
-    "build:runtime": "tsdown --config tsdown.config.ts",
-    "build": "npm run build:types && npm run build:runtime",
-    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
+    "build": "tsc -p tsconfig.json && tsdown",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "test:e2e": "DSH_PI_E2E=1 vitest run --config vitest.e2e.config.ts",
-    "clean": "rm -rf packages/*/lib packages/*/*.tsbuildinfo *.tsbuildinfo"
+    "clean": "rm -rf lib *.tsbuildinfo"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-brand": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-llm": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-session": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-subagent": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-timeout": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.3",
+    "@deepseek-ai/schemastery": "^3.18.5"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.6-alpha.1",
-    "@deepseek-ai/cordis-plugin-loader": "~1.0.7-alpha.1",
-    "@deepseek-ai/dsh-agent": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-agent-preset-registry": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-attachment": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-agent-loop-testkit": "0.2.2-alpha.2",
     "@deepseek-ai/dsh-brand": "0.2.2-alpha.2",
     "@deepseek-ai/dsh-llm": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-sandbox": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-sandbox-policy": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-scope": "0.2.2-alpha.2",
     "@deepseek-ai/dsh-session": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-session-persistence": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-session-projection": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-session-query": "0.2.2-alpha.2",
     "@deepseek-ai/dsh-subagent": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-system-prompt": "0.2.2-alpha.2",
     "@deepseek-ai/dsh-timeout": "0.2.2-alpha.2",
     "@deepseek-ai/dsh-tools": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-tool-testkit": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-typert-protocol": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-user-approval": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-util-time": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-util-values": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-working-directory": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-workspace": "0.2.2-alpha.2",
     "@deepseek-ai/schemastery": "~3.18.6-alpha.1",
-    "@earendil-works/pi-agent-core": "1.4.0",
-    "@earendil-works/pi-ai": "1.4.0",
-    "@earendil-works/pi-coding-agent": "1.4.0",
     "@types/node": "^22.10.0",
-    "typescript": "~5.7.0",
     "tsdown": "^0.22.2",
+    "typescript": "~5.7.0",
     "vitest": "^3.0.0"
   }
 }

@@ -53,6 +53,8 @@ export function apply(ctx: Context, config: Config): void {
       + 'a later completion notice carries Pi\'s final answer. '
       + 'To continue the same Pi conversation later, pass that piSessionId as `session` with the same `cwd`; '
       + 'Pi then reuses the whole session, so follow-up work costs no re-explanation. '
+      + 'A run stopped by its deadline or ending with an error keeps its Pi session: '
+      + 'call again with that piSessionId to inspect what it did and continue. '
       + 'Start independent tasks together and continue useful work while they run.',
     parameters: {
       description: {

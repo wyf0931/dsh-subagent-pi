@@ -22,9 +22,9 @@ window.__ModuleLoader__.load({
       modelHint: "For example deepseek/deepseek-flash. Leave empty to use Pi's own default model.",
       thinking: 'Thinking level',
       thinkingDefault: 'Pi default',
-      timeout: 'Turn timeout (ms)',
-      timeoutPlaceholder: 'no timeout',
-      timeoutHint: 'Empty cancels only when the parent turn is cancelled.',
+      timeout: 'Turn deadline',
+      timeoutPlaceholder: 'no deadline, e.g. 1h',
+      timeoutHint: 'Empty means no deadline. Accepts 45s, 30m, 1h, 1h30m, or milliseconds. After the deadline Pi gets 30s to settle before it is stopped; its session is kept either way.',
       excludeTools: 'Excluded tools',
       excludePlaceholder: 'tool_a, tool_b',
       excludeHint: 'Comma-separated Pi tool names. Empty excludes none.',
@@ -37,7 +37,7 @@ window.__ModuleLoader__.load({
       readOnly: 'The profile is read-only for this configuration.',
       conflict: 'Another change landed first. The form was refreshed; review and save again.',
       invalidModel: 'Use provider/model, for example deepseek/deepseek-flash.',
-      invalidTimeout: 'Enter a positive whole number of milliseconds.',
+      invalidTimeout: 'Use 45s, 30m, 1h, 1h30m, or a whole number of milliseconds.',
       saveFailed: 'The Host refused the change.',
     }
 
@@ -50,9 +50,9 @@ window.__ModuleLoader__.load({
       modelHint: '例如 deepseek/deepseek-flash。留空则使用 Pi 自己的默认模型。',
       thinking: '思考级别',
       thinkingDefault: 'Pi 默认',
-      timeout: '回合超时（毫秒）',
-      timeoutPlaceholder: '不超时',
-      timeoutHint: '留空表示只在父回合被取消时取消。',
+      timeout: '回合时限',
+      timeoutPlaceholder: '不设置，例如 1h',
+      timeoutHint: '留空表示不设时限。支持 45s、30m、1h、1h30m 或毫秒数。到时限后 Pi 还有 30 秒自然收尾，之后才停止；会话始终保留。',
       excludeTools: '排除的工具',
       excludePlaceholder: 'tool_a, tool_b',
       excludeHint: '用逗号分隔的 Pi 工具名。留空表示不排除。',
@@ -65,7 +65,7 @@ window.__ModuleLoader__.load({
       readOnly: '该配置在此 profile 中为只读。',
       conflict: '已有其他修改先落地。表单已刷新，请检查后重新保存。',
       invalidModel: '请使用 provider/model，例如 deepseek/deepseek-flash。',
-      invalidTimeout: '请输入正整数的毫秒值。',
+      invalidTimeout: '请使用 45s、30m、1h、1h30m 或整数毫秒。',
       saveFailed: 'Host 拒绝了这次修改。',
     }
 
@@ -112,7 +112,7 @@ window.__ModuleLoader__.load({
       return {
         model: typeof source.model === 'string' ? source.model : '',
         thinking: typeof source.thinking === 'string' ? source.thinking : '',
-        timeoutMs: typeof source.timeoutMs === 'number' ? String(source.timeoutMs) : '',
+        timeout: typeof source.timeout === 'string' ? source.timeout : '',
         excludeTools: Array.isArray(source.excludeTools) ? source.excludeTools.join(', ') : '',
       }
     }
@@ -135,12 +135,11 @@ window.__ModuleLoader__.load({
           ? { op: 'unset', path: ['thinking'] }
           : { op: 'set', path: ['thinking'], value: draft.thinking })
       }
-      const timeoutText = draft.timeoutMs.trim()
-      const timeoutMs = timeoutText === '' ? undefined : Number(timeoutText)
-      if (timeoutMs !== current.timeoutMs) {
-        operations.push(timeoutMs === undefined
-          ? { op: 'unset', path: ['timeoutMs'] }
-          : { op: 'set', path: ['timeoutMs'], value: timeoutMs })
+      const timeout = draft.timeout.trim()
+      if (timeout !== (typeof current.timeout === 'string' ? current.timeout : '')) {
+        operations.push(timeout === ''
+          ? { op: 'unset', path: ['timeout'] }
+          : { op: 'set', path: ['timeout'], value: timeout })
       }
       const tools = readTools(draft.excludeTools)
       const currentTools = Array.isArray(current.excludeTools) ? current.excludeTools : []
@@ -223,13 +222,10 @@ window.__ModuleLoader__.load({
           setFailure(t('invalidModel'))
           return
         }
-        const timeoutText = draft.timeoutMs.trim()
-        if (timeoutText !== '') {
-          const timeoutMs = Number(timeoutText)
-          if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2147483647) {
-            setFailure(t('invalidTimeout'))
-            return
-          }
+        const timeout = draft.timeout.trim()
+        if (timeout !== '' && !/^(\d+[hms])+$/i.test(timeout.replace(/\s+/gu, '')) && !/^\d+$/.test(timeout)) {
+          setFailure(t('invalidTimeout'))
+          return
         }
         void commit(buildOperations(draft, state.value))
       }
@@ -240,7 +236,7 @@ window.__ModuleLoader__.load({
         for (const [path, present] of [
           ['model', current.model !== ''],
           ['thinking', current.thinking !== ''],
-          ['timeoutMs', current.timeoutMs !== ''],
+          ['timeout', current.timeout !== ''],
           ['excludeTools', current.excludeTools !== ''],
         ]) {
           if (present) operations.push({ op: 'unset', path: [path] })
@@ -288,12 +284,12 @@ window.__ModuleLoader__.load({
           }, h('input', {
             id: `${prefix}-timeout`,
             className: 'dsp-input',
-            type: 'number',
-            min: 1,
-            step: 1,
+            type: 'text',
+            spellCheck: false,
+            autoComplete: 'off',
             placeholder: t('timeoutPlaceholder'),
-            value: draft.timeoutMs,
-            onChange: update('timeoutMs'),
+            value: draft.timeout,
+            onChange: update('timeout'),
           })),
           h(Field, {
             label: t('excludeTools'),

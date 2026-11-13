@@ -62,9 +62,9 @@ Pi 自己的位置上，所以在该目录执行 `pi --session <id>` 或 `pi --r
 | `model` | Pi 自身选择 | `--model`，例如 `deepseek/deepseek-flash` |
 | `thinking` | Pi 自身选择 | `--thinking`：`off` … `max` |
 | `excludeTools` | `[]` | `--exclude-tools`，要禁用的 Pi 工具名 |
-| `timeoutMs` | 不超时 | 提示发出后的回合上限 |
+| `timeout` | 不设时限 | 时限，支持 `1h`、`30m`、`45s` 或毫秒数 |
 
-`model`、`thinking`、`excludeTools`、`timeoutMs` 可在 Plugins 页面编辑，下一次委派
+`model`、`thinking`、`excludeTools`、`timeout` 可在 Plugins 页面编辑，下一次委派
 生效。`providerName`、`piPath`、`agentDir`、`sessionDir`、`approve` 只走 YAML，
 因为它们标识提供方实例与其环境。
 
@@ -80,6 +80,17 @@ Pi 自己的位置上，所以在该目录执行 `pi --session <id>` 或 `pi --r
     providerName: pi
     toolName: delegate_pi
 ```
+
+## 时限与长任务
+
+默认**没有时限**：一次委派会一直活到 Pi 自己收敛，或父会话取消它。`timeout` 只是
+保险丝：
+
+- `30m`、`1h`、`1h30m`、`45s` 或整数毫秒；上限是 Node 定时器上限（约 24.9 天）。
+- 到时限后 Pi 还有 **30 秒宽限**自然收尾，之后才被停止——刚好晚一点完成的任务不会白干。
+- 被停止的运行会保留 Pi 会话：诊断里直接给出 `piSessionId`，用它作为 `session`
+  再调一次 `delegate_pi` 就能继续同一个对话，父智能体可以先探查再收尾，而不是从零重来。
+- 父会话取消或 DSH 关闭时，子进程的 stdin 会被关闭，Pi 会自行退出，不会遗留孤儿进程。
 
 ## 一次委派发生了什么
 

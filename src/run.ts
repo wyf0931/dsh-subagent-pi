@@ -19,6 +19,7 @@ import {
 } from '@deepseek-ai/dsh-subagent'
 import { createAnswerCollector } from './answer.ts'
 import { takeControl, type PiControl } from './control.ts'
+import { formatDuration } from './duration.ts'
 import { PiSubagentFailure, toError } from './failures.ts'
 import { isDialog, PiProcess, type PiRecord } from './rpc.ts'
 
@@ -47,13 +48,8 @@ export interface PiRunSpec {
 /** How long a cancellation waits for Pi to honour the abort before signals. */
 const ABORT_GRACE_MS = 2_000
 
-/** Fixed, credential-free diagnostics for each failing stage. */
-const DIAGNOSTICS = {
-  rejected: 'Pi rejected the prompt. Check the model, the account, and the Pi CLI version.',
-  exited: 'Pi exited before the run settled.',
-  timeout: 'Pi did not settle within timeoutMs. Increase it or use a smaller task.',
-  aborted: 'The run was cancelled.',
-} as const
+/** How long Pi may still settle after the deadline before the run is stopped. */
+const TIMEOUT_GRACE_MS = 30_000
 
 /** Validate and join the delegated text; Pi accepts one text task. */
 export function textTask(prompt: readonly ContentBlock[]): string {
@@ -102,38 +98,58 @@ interface PiRunState {
 }
 
 /** Build the state machine for one delegation. */
-function createRun(spec: PiRunSpec, prompt: string, pi: () => PiProcess): PiRunState {
+function createRun(spec: PiRunSpec, prompt: string, sessionId: string, pi: () => PiProcess): PiRunState {
   const collector = createAnswerCollector()
   const settled = Promise.withResolvers<SubagentResult>()
   const promptId = `prompt-${randomUUID()}`
+  const resumeHint = `Continue with session ${sessionId} to keep the same Pi conversation and inspect what it already did.`
+  const diagnostics = {
+    rejected: 'Pi rejected the prompt. Check the model, the account, and the Pi CLI version.',
+    exited: `Pi exited before the run settled. ${resumeHint}`,
+    aborted: `The run was cancelled before Pi settled. ${resumeHint}`,
+    timeout: `Pi was still working after ${formatDuration(spec.timeoutMs ?? 0)}. It was stopped and its session was kept. ${resumeHint}`,
+  } as const
   let phase: 'idle' | 'running' | 'done' = 'idle'
-  let timer: NodeJS.Timeout | undefined
+  let deadline: NodeJS.Timeout | undefined
+  let grace: NodeJS.Timeout | undefined
 
   const output = (): ContentBlock[] => {
     const answer = collector.answer()
     return answer.length === 0 ? [] : [{ type: 'text', text: answer }]
   }
 
+  const clearTimers = (): void => {
+    for (const timer of [deadline, grace]) {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+    deadline = undefined
+    grace = undefined
+  }
+
   const finish = (result: SubagentResult): void => {
     if (phase === 'done') return
     phase = 'done'
-    if (timer !== undefined) {
-      clearTimeout(timer)
-      timer = undefined
-    }
+    clearTimers()
     settled.resolve(result)
   }
 
-  const cancel = (): void => {
+  const stop = (result: SubagentResult): void => {
     if (phase === 'done') return
-    finish({ output: output(), stopReason: 'aborted', diagnostic: DIAGNOSTICS.aborted })
+    finish(result)
     pi().send({ type: 'abort' })
   }
 
-  const timeout = (): void => {
-    if (phase === 'done') return
-    finish({ output: output(), stopReason: 'error', diagnostic: DIAGNOSTICS.timeout })
-    pi().send({ type: 'abort' })
+  const cancel = (): void => {
+    stop({ output: output(), stopReason: 'aborted', diagnostic: diagnostics.aborted })
+  }
+
+  // The deadline is soft: Pi gets a grace window to settle on its own, so a
+  // long task that finishes just after the deadline is not killed for nothing.
+  const overdue = (): void => {
+    if (phase !== 'running' || grace !== undefined) return
+    grace = setTimeout(() => {
+      stop({ output: output(), stopReason: 'error', diagnostic: diagnostics.timeout })
+    }, TIMEOUT_GRACE_MS)
   }
 
   return {
@@ -142,13 +158,13 @@ function createRun(spec: PiRunSpec, prompt: string, pi: () => PiProcess): PiRunS
     exited: () => {
       if (phase === 'done') return
       report(spec, new PiSubagentFailure('turn', 'unknown'))
-      finish({ output: output(), stopReason: 'error', diagnostic: DIAGNOSTICS.exited })
+      finish({ output: output(), stopReason: 'error', diagnostic: diagnostics.exited })
     },
     start: () => {
       if (phase !== 'idle') return
       phase = 'running'
       pi().send({ id: promptId, type: 'prompt', message: prompt })
-      if (spec.timeoutMs !== undefined) timer = setTimeout(timeout, spec.timeoutMs)
+      if (spec.timeoutMs !== undefined) deadline = setTimeout(overdue, spec.timeoutMs)
     },
     handle: (record) => {
       if (phase !== 'running') return
@@ -175,7 +191,7 @@ function createRun(spec: PiRunSpec, prompt: string, pi: () => PiProcess): PiRunS
         case 'response': {
           if (record.command !== 'prompt' || record.id !== promptId) return
           if (record.success !== true) {
-            finish({ output: output(), stopReason: 'error', diagnostic: DIAGNOSTICS.rejected })
+            finish({ output: output(), stopReason: 'error', diagnostic: diagnostics.rejected })
             return
           }
           const data = record.data !== null && typeof record.data === 'object'
@@ -208,7 +224,7 @@ export async function startPiRun(
   if (request.signal.aborted) throw new PiSubagentFailure('startup', 'cancelled')
 
   let pi: PiProcess | undefined
-  const state = createRun(spec, prompt, () => {
+  const state = createRun(spec, prompt, control.sessionId, () => {
     if (pi === undefined) throw new PiSubagentFailure('startup', 'cancelled')
     return pi
   })

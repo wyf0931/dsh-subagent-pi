@@ -12,7 +12,7 @@ import {
   NO_START_CAPABILITIES,
   type SubagentProvider,
 } from '@deepseek-ai/dsh-subagent'
-import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
+import { parseDuration } from './duration.ts'
 import { PiSubagentFailure } from './failures.ts'
 import { startPiRun, type PiRunSpec } from './run.ts'
 
@@ -42,8 +42,8 @@ export interface Config {
   thinking?: string
   /** Pi tool names excluded from every delegated session. */
   excludeTools?: string[]
-  /** Turn deadline in milliseconds after the prompt is sent. */
-  timeoutMs?: number
+  /** Deadline such as `30m` or `1h` after the prompt is sent; omission means no deadline. */
+  timeout?: string
 }
 
 export const Config = z.object({
@@ -57,7 +57,7 @@ export const Config = z.object({
   model: z.string().min(1).volatile(),
   thinking: z.string().min(1).volatile(),
   excludeTools: z.array(z.string().min(1)).default([]).volatile(),
-  timeoutMs: z.number().min(1).max(MAX_TIMER_DELAY_MS).volatile(),
+  timeout: z.string().min(1).volatile(),
 })
 
 /** Resolved configuration: volatile fields are live references into the profile layer. */
@@ -76,7 +76,7 @@ function readSpec(config: ResolvedConfig): PiRunSpec {
       cause: new Error(`Pi has no thinking level ${thinking} (levels: ${THINKING_LEVELS.join(', ')})`),
     })
   }
-  const timeoutMs = config.timeoutMs?.get()
+  const timeout = config.timeout?.get()
   const model = config.model?.get()
   return {
     piPath: config.piPath ?? 'pi',
@@ -85,7 +85,7 @@ function readSpec(config: ResolvedConfig): PiRunSpec {
     ...(config.agentDir === undefined ? {} : { agentDir: config.agentDir }),
     ...(config.sessionDir === undefined ? {} : { sessionDir: config.sessionDir }),
     ...(thinking === undefined ? {} : { thinking }),
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(timeout === undefined ? {} : { timeoutMs: parseDuration(timeout) }),
     ...(model === undefined ? {} : { model }),
   }
 }

@@ -65,9 +65,9 @@ conversation.
 | `model` | Pi selection | `--model`, e.g. `deepseek/deepseek-flash` |
 | `thinking` | Pi selection | `--thinking`: `off` … `max` |
 | `excludeTools` | `[]` | `--exclude-tools`, Pi tool names to disable |
-| `timeoutMs` | none | turn deadline after the prompt is sent |
+| `timeout` | none | deadline such as `1h`, `30m`, `45s`, or milliseconds |
 
-`model`, `thinking`, `excludeTools` and `timeoutMs` are editable from the
+`model`, `thinking`, `excludeTools` and `timeout` are editable from the
 Plugins page and apply to the next delegation. `providerName`, `piPath`,
 `agentDir`, `sessionDir` and `approve` are YAML-only, because they identify the
 provider instance and its environment.
@@ -84,6 +84,21 @@ provider instance and its environment.
     providerName: pi
     toolName: delegate_pi
 ```
+
+## Deadlines and long tasks
+
+There is **no deadline by default**: a delegation lives until Pi settles or the
+parent cancels. Set `timeout` only as a safety valve:
+
+- `30m`, `1h`, `1h30m`, `45s`, or a whole number of milliseconds; the ceiling is
+  the Node timer limit (about 24.9 days).
+- When the deadline passes, Pi gets a 30-second grace window to settle on its
+  own; only then is it stopped, so work that finishes just late is not wasted.
+- A stopped run keeps its Pi session. The diagnostic names the `piSessionId`,
+  and `delegate_pi` with `session` continues the same conversation — the parent
+  can inspect what Pi did and finish the work instead of starting over.
+- Parent cancellation and DSH shutdown close the child's stdin, so Pi shuts down
+  rather than leaking a process.
 
 ## How a delegation runs
 

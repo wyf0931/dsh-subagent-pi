@@ -1,6 +1,6 @@
 {
   "name": "dsh-subagent-pi",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Pi coding agent as a DeepSeek Harness subagent provider: one isolated `pi` process per delegation, with resumable sessions over Pi RPC.",
   "keywords": [
     "dsh",

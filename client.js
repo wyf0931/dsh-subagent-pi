@@ -38,6 +38,25 @@ window.__ModuleLoader__.load({
       conflict: 'Another change landed first. The form was refreshed; review and save again.',
       invalidModel: 'Use provider/model, for example deepseek/deepseek-flash.',
       invalidTimeout: 'Use 45s, 30m, 1h, 1h30m, or a whole number of milliseconds.',
+      historyTitle: 'Session history',
+      historyIntro: 'Pi sessions started from this plugin. Read from Pi\'s own session files; no Pi process is started.',
+      historyOurs: 'Delegated here',
+      historyAll: 'All Pi sessions',
+      historyRefresh: 'Refresh',
+      historyLoading: 'Loading sessions…',
+      historyFailed: 'Could not read Pi session history.',
+      historyEmpty: 'No delegated session yet. Use delegate_pi, then refresh.',
+      historyEmptyAll: 'No Pi session files found in the Pi home.',
+      historyCount: '{shown} of {total} session files',
+      colTitle: 'Session',
+      colModel: 'Model',
+      colTurns: 'Turns',
+      colInput: 'Input',
+      colCached: 'Cached in',
+      colOutput: 'Output',
+      colTotal: 'Total',
+      colCost: 'Cost',
+      colUpdated: 'Updated',
       saveFailed: 'The Host refused the change.',
     }
 
@@ -66,6 +85,25 @@ window.__ModuleLoader__.load({
       conflict: '已有其他修改先落地。表单已刷新，请检查后重新保存。',
       invalidModel: '请使用 provider/model，例如 deepseek/deepseek-flash。',
       invalidTimeout: '请使用 45s、30m、1h、1h30m 或整数毫秒。',
+      historyTitle: '会话历史',
+      historyIntro: '本插件发起的 Pi 会话。直接读取 Pi 自己的 session 文件，不启动任何 Pi 进程。',
+      historyOurs: '本插件委派',
+      historyAll: '全部 Pi 会话',
+      historyRefresh: '刷新',
+      historyLoading: '正在读取会话…',
+      historyFailed: '读取 Pi 会话历史失败。',
+      historyEmpty: '还没有委派记录。先用一次 delegate_pi，然后刷新。',
+      historyEmptyAll: 'Pi 主目录下没有找到 session 文件。',
+      historyCount: '显示 {shown} / 共 {total} 个 session 文件',
+      colTitle: '会话',
+      colModel: '模型',
+      colTurns: '轮次',
+      colInput: '输入',
+      colCached: '缓存输入',
+      colOutput: '输出',
+      colTotal: '合计',
+      colCost: '成本',
+      colUpdated: '更新时间',
       saveFailed: 'Host 拒绝了这次修改。',
     }
 
@@ -104,6 +142,20 @@ window.__ModuleLoader__.load({
 .dsp-config .dsp-status { font-size: 12.5px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
 .dsp-config .dsp-error { margin: 0; font-size: 12.5px; line-height: 20px; color: var(--dsw-alias-state-error-primary); }
 @media (max-width: 560px) { .dsp-config .dsp-grid { grid-template-columns: 1fr; } }
+.dsp-history { display: flex; flex-direction: column; gap: 12px; border-top: 0.5px solid var(--dsw-alias-border-l4); padding-top: 18px; }
+.dsp-history .dsp-history-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dsp-history h4 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.dsp-history .dsp-history-actions { display: flex; align-items: center; gap: 8px; }
+.dsp-history .dsp-seg { display: inline-flex; border: 0.5px solid var(--dsw-alias-border-l4); border-radius: var(--dsw-radius-md); overflow: hidden; }
+.dsp-history .dsp-seg button { height: 30px; padding: 0 12px; font: inherit; font-size: 12.5px; border: 0; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.dsp-history .dsp-seg button.is-on { background: var(--dsw-alias-state-business-primary); color: var(--dsw-alias-label-primary-foreground); }
+.dsp-history .dsp-table-wrap { overflow-x: auto; }
+.dsp-history table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.dsp-history th { text-align: left; font-weight: 500; color: var(--dsw-alias-label-tertiary); padding: 6px 8px; border-bottom: 0.5px solid var(--dsw-alias-border-l4); white-space: nowrap; }
+.dsp-history td { padding: 7px 8px; border-bottom: 0.5px solid var(--dsw-alias-border-l4); color: var(--dsw-alias-label-secondary); vertical-align: top; }
+.dsp-history td.dsp-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dsp-history .dsp-name { color: var(--dsw-alias-label-primary); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsp-history .dsp-sub { margin-top: 2px; font-size: 11.5px; color: var(--dsw-alias-label-tertiary); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `
 
     /** Read the form's effective values into editable text fields. */
@@ -320,7 +372,96 @@ window.__ModuleLoader__.load({
             onClick: restore,
           }, t('restore')),
           notice === '' ? null : h('span', { className: 'dsp-status', role: 'status' }, notice)),
-        state.writable === false ? h('p', { className: 'dsp-hint' }, t('readOnly')) : null)
+        state.writable === false ? h('p', { className: 'dsp-hint' }, t('readOnly')) : null,
+        h(SessionHistory, { t }))
+    }
+
+
+    /** Compact token count, with the exact value available as a tooltip. */
+    function compactNumber(value) {
+      if (typeof value !== 'number' || value === 0) return '—'
+      return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+    }
+
+    /** Exact integer with grouping. */
+    function exactNumber(value) {
+      return new Intl.NumberFormat().format(typeof value === 'number' ? value : 0)
+    }
+
+    /** Cost in dollars, with more precision for sub-cent values. */
+    function costText(value) {
+      if (typeof value !== 'number' || value === 0) return '—'
+      return value < 0.01 ? `$${value.toFixed(4)}` : `$${value.toFixed(2)}`
+    }
+
+    /** Local date and time, or a dash. */
+    function dateText(iso) {
+      const date = new Date(iso)
+      return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
+    }
+
+    /** The session history table served by the Host route. */
+    function SessionHistory({ t }) {
+      const [scope, setScope] = React.useState('delegated')
+      const [rows, setRows] = React.useState([])
+      const [total, setTotal] = React.useState(0)
+      const [status, setStatus] = React.useState('loading')
+
+      const load = React.useCallback(async (which) => {
+        setStatus('loading')
+        try {
+          const response = await fetch('api/dsh-subagent-pi/sessions', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ scope: which, limit: 50 }),
+          })
+          const data = await response.json()
+          if (response.ok !== true || data === null || typeof data !== 'object' || data.ok !== true) throw new Error('failed')
+          setRows(Array.isArray(data.value?.sessions) ? data.value.sessions : [])
+          setTotal(typeof data.value?.total === 'number' ? data.value.total : 0)
+          setStatus('ready')
+        } catch {
+          setStatus('error')
+        }
+      }, [])
+
+      React.useEffect(() => { void load(scope) }, [scope, load])
+
+      const columns = [t('colTitle'), t('colModel'), t('colTurns'), t('colInput'), t('colCached'), t('colOutput'), t('colTotal'), t('colCost'), t('colUpdated')]
+      const body = status === 'loading'
+        ? h('p', { className: 'dsp-hint' }, t('historyLoading'))
+        : status === 'error'
+          ? h('p', { className: 'dsp-error', role: 'alert' }, t('historyFailed'))
+          : rows.length === 0
+            ? h('p', { className: 'dsp-hint' }, scope === 'delegated' ? t('historyEmpty') : t('historyEmptyAll'))
+            : h('div', { className: 'dsp-table-wrap' },
+              h('table', null,
+                h('thead', null, h('tr', null, columns.map(label => h('th', { key: label }, label)))),
+                h('tbody', null, rows.map(row => h('tr', { key: row.id },
+                  h('td', null,
+                    h('div', { className: 'dsp-name', title: row.title }, row.title),
+                    h('div', { className: 'dsp-sub', title: row.cwd }, row.cwd || row.id)),
+                  h('td', null, row.model || '—'),
+                  h('td', { className: 'dsp-num' }, exactNumber(row.turns)),
+                  h('td', { className: 'dsp-num', title: exactNumber(row.input) }, compactNumber(row.input)),
+                  h('td', { className: 'dsp-num', title: exactNumber(row.cacheRead) }, compactNumber(row.cacheRead)),
+                  h('td', { className: 'dsp-num', title: exactNumber(row.output) }, compactNumber(row.output)),
+                  h('td', { className: 'dsp-num', title: exactNumber(row.total) }, compactNumber(row.total)),
+                  h('td', { className: 'dsp-num' }, costText(row.cost)),
+                  h('td', null, dateText(row.updatedAt)))))))
+
+      return h('div', { className: 'dsp-history' },
+        h('div', { className: 'dsp-history-head' },
+          h('div', null,
+            h('h4', null, t('historyTitle')),
+            h('p', { className: 'dsp-hint' }, t('historyIntro')),
+            status === 'ready' ? h('p', { className: 'dsp-hint' }, t('historyCount').replace('{shown}', String(rows.length)).replace('{total}', String(total))) : null),
+          h('div', { className: 'dsp-history-actions' },
+            h('div', { className: 'dsp-seg' },
+              h('button', { type: 'button', className: scope === 'delegated' ? 'is-on' : '', onClick: () => setScope('delegated') }, t('historyOurs')),
+              h('button', { type: 'button', className: scope === 'all' ? 'is-on' : '', onClick: () => setScope('all') }, t('historyAll'))),
+            h('button', { type: 'button', className: 'dsp-button dsp-ghost', disabled: status === 'loading', onClick: () => { void load(scope) } }, t('historyRefresh')))),
+        body)
     }
 
     const NOOP_UNSUBSCRIBE = () => {}

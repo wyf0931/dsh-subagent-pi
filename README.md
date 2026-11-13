@@ -34,6 +34,11 @@ dsh plugin --profile <profile> add /absolute/path/to/dsh-subagent-pi
 Or install the directory through the Plugins page. Restart DSH if the profile
 does not hot-load bundles. `delegate_pi` then appears for the model.
 
+Requirements: the Pi CLI **1.5.x** (verified against 1.5.2) on `PATH`, or
+configured through `piPath`; Pi's own authentication and models must already
+work for the account running DSH. The history table reads Pi's session files,
+so it needs the same `agentDir` / `sessionDir` the provider uses.
+
 ## Resumable sessions (the point)
 
 Every result carries a `piSessionId`. Pass it back as `session` — with the same
@@ -115,6 +120,25 @@ The only private channel between the tool and the provider is one reserved
 control block appended to the prompt and stripped before Pi sees it; it carries
 the session id and whether this is a resume.
 
+## Session history
+
+The configuration page lists Pi sessions started from this plugin:
+
+| Column | Source |
+|---|---|
+| Session | Pi's `session_info` name, else the first user message |
+| Model | the last model change / assistant message |
+| Turns | assistant messages in the session |
+| Input / Cached in / Output / Total | summed `usage` of assistant, tool-reported and compaction entries |
+| Cost | summed `usage.cost.total` |
+| Updated | the last entry's timestamp |
+
+Rows come from Pi's own JSONL files under `<agentDir>/sessions/` (or the
+configured `sessionDir`), streamed read-only; no Pi process is started. The plugin records the ids it delegated in
+`$DSH_HOME/dsh-subagent-pi/sessions.json`, so the default **Delegated here**
+view is exact. Switch to **All Pi sessions** to browse recent sessions started
+by your own `pi` runs in the same Pi home.
+
 ## Known limits
 
 - One prompt per child process: no mid-run steering, no streaming into the
@@ -124,7 +148,8 @@ the session id and whether this is a resume.
 - Pi dialogs that require an answer are cancelled; enable `approve` (default)
   so project-local files are trusted without a prompt.
 - Extension flags and versions are whatever the local Pi provides; RPC is
-  version-specific enough that this bundle documents Pi 1.4.x as its baseline.
+  version-specific enough that this bundle documents Pi 1.5.x as its baseline
+  (verified against 1.5.2).
 
 ## Repository history
 

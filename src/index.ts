@@ -6,6 +6,7 @@
  * @module dsh-subagent-pi
  */
 
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import {
@@ -15,6 +16,7 @@ import {
 import { parseDuration } from './duration.ts'
 import { PiSubagentFailure } from './failures.ts'
 import { startPiRun, type PiRunSpec } from './run.ts'
+import { countSessionFiles, listSessions, resolveAgentDir, type HistoryRequest } from './sessions.ts'
 
 export const name = 'subagent-pi'
 export const inject = ['subagents']
@@ -90,6 +92,46 @@ function readSpec(config: ResolvedConfig): PiRunSpec {
   }
 }
 
+/** The slice of the authenticated connection service this plugin serves from. */
+interface ConnectionScope {
+  connection: {
+    fetch: {
+      register(route: {
+        path: string
+        methods: string[]
+        requestBody: 'buffered'
+        fetch: (request: { json(): Promise<unknown> }) => Promise<Response>
+      }): () => void | Promise<void>
+    }
+  }
+}
+
+/**
+ * Serve the session history table. Reads Pi's own JSONL files; never spawns Pi.
+ * @param config - the provider configuration that names Pi's home.
+ * @param request - POST request whose body selects scope and row limit.
+ * @returns JSON with the rows, or a fixed failure message.
+ */
+async function history(config: ResolvedConfig, request: { json(): Promise<unknown> }): Promise<Response> {
+  const headers = { 'cache-control': 'no-store' }
+  try {
+    let body: Record<string, unknown> = {}
+    try {
+      const parsed = await request.json()
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) body = parsed as Record<string, unknown>
+    } catch { /* An empty body takes the defaults. */ }
+    const scope = body.scope === 'all' ? 'all' : 'delegated'
+    const limit = typeof body.limit === 'number' ? body.limit : undefined
+    const sessionsRoot = config.sessionDir ?? join(resolveAgentDir(config.agentDir), 'sessions')
+    const historyRequest: HistoryRequest = { scope, ...(limit === undefined ? {} : { limit }) }
+    const sessions = await listSessions(sessionsRoot, historyRequest)
+    const total = await countSessionFiles(sessionsRoot)
+    return Response.json({ ok: true, value: { sessions, total } }, { headers })
+  } catch {
+    return Response.json({ ok: false, error: { message: 'Could not read Pi session history.' } }, { headers })
+  }
+}
+
 /**
  * Register one Pi RPC provider with the shared subagent service.
  * @param ctx - context carrying the shared subagent service.
@@ -110,4 +152,18 @@ export function apply(ctx: Context, config: ResolvedConfig): void {
     start: request => startPiRun(request, spec()),
   }
   ctx.subagents.registerProvider(provider)
+
+  // The history table lives on the Plugins page, so it is served over the same
+  // authenticated connection channel the rest of the client uses.
+  ctx.inject(['connection'], (scope) => {
+    const connection = (scope as unknown as ConnectionScope).connection
+    if (connection === undefined) return
+    const dispose = connection.fetch.register({
+      path: '/api/dsh-subagent-pi/sessions',
+      methods: ['POST'],
+      requestBody: 'buffered',
+      fetch: request => history(config, request),
+    })
+    scope.effect(() => () => { void dispose() }, 'subagent-pi: history route')
+  })
 }

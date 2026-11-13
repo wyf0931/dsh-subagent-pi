@@ -22,6 +22,7 @@ import { takeControl, type PiControl } from './control.ts'
 import { formatDuration } from './duration.ts'
 import { PiSubagentFailure, toError } from './failures.ts'
 import { isDialog, PiProcess, type PiRecord } from './rpc.ts'
+import { recordSession } from './sessions.ts'
 
 /** Resolved deployment settings shared by every delegation of one provider instance. */
 export interface PiRunSpec {
@@ -222,6 +223,7 @@ export async function startPiRun(
   const control: PiControl = split.control ?? { sessionId: randomUUID(), resume: false }
   const cwd = assertUsableCwd('subagent-pi', 'child cwd', request.cwd)
   if (request.signal.aborted) throw new PiSubagentFailure('startup', 'cancelled')
+  await recordSession(control.sessionId, cwd)
 
   let pi: PiProcess | undefined
   const state = createRun(spec, prompt, control.sessionId, () => {
